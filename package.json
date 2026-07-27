@@ -1,0 +1,31 @@
+{
+  "name": "org-fleet",
+  "version": "0.1.0",
+  "description": "Manage repo-fleet manifests across multiple organizations",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "org-fleet": "./bin/org-fleet"
+  },
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "tsx": "^4.20.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.1",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "organizations",
+    "repositories",
+    "workspace",
+    "fleet",
+    "repo-fleet"
+  ]
+}

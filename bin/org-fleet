@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+script=$0
+while [ -L "$script" ]; do
+  case "$script" in
+    */*) script_dir=${script%/*} ;;
+    *) script_dir=. ;;
+  esac
+  dir=$(CDPATH= cd -- "$script_dir" && pwd)
+  link=$(readlink "$script")
+  case "$link" in
+    /*) script=$link ;;
+    *) script=$dir/$link ;;
+  esac
+done
+
+case "$script" in
+  */*) script_dir=${script%/*} ;;
+  *) script_dir=. ;;
+esac
+dir=$(CDPATH= cd -- "$script_dir" && pwd)
+exec node --import "$dir/../node_modules/tsx/dist/loader.mjs" "$dir/org-fleet.ts" "$@"
