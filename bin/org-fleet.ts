@@ -14,6 +14,8 @@ import type { Manifest, Organization } from "../src/manifest.ts";
 
 const VERSION = "0.1.0";
 const DEFAULT_MANIFEST = "org-fleet.json";
+const REPO_FLEET_COMMANDS = new Set(["list", "validate", "path", "remotes", "status", "doctor", "clone-missing", "sync"]);
+const MUTATING_REPO_FLEET_COMMANDS = new Set(["clone-missing", "sync"]);
 
 interface ParsedArgs {
   command: string | null;
@@ -63,17 +65,14 @@ function main(argv: string[]): number {
     return 2;
   }
 
-  if (parsed.command === "list") {
-    return commandList(orgs, workspaceRoot, parsed.json);
+  if (parsed.command === "orgs") {
+    return commandOrgs(orgs, workspaceRoot, parsed.json);
   }
-  if (parsed.command === "validate") {
-    return commandValidate(manifest, orgs, workspaceRoot, parsed.json);
+  if (parsed.command === "manifest-path") {
+    return commandManifestPath(manifest, workspaceRoot, parsed.args, parsed.json);
   }
-  if (parsed.command === "path") {
-    return commandPath(manifest, workspaceRoot, parsed.args, parsed.json);
-  }
-  if (parsed.command === "sync") {
-    return commandSync(orgs, workspaceRoot, parsed.dryRun, parsed.json, parsed.args);
+  if (parsed.command && REPO_FLEET_COMMANDS.has(parsed.command)) {
+    return commandRepoFleet(manifest, orgs, workspaceRoot, parsed.command, parsed.dryRun, parsed.json, parsed.args);
   }
 
   console.error(`unknown command ${parsed.command}`);
@@ -155,9 +154,15 @@ function requireValue(flag: string, args: string[]): string | null {
 
 function printUsage(): void {
   console.error(`Usage:
+  org-fleet orgs [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
+  org-fleet manifest-path ORG_ID [--manifest PATH] [--workspace-root PATH] [--json]
   org-fleet list [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
   org-fleet validate [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
-  org-fleet path ORG_ID [--manifest PATH] [--workspace-root PATH] [--json]
+  org-fleet path ORG_ID REPO_ID [--manifest PATH] [--workspace-root PATH] [--json]
+  org-fleet remotes [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
+  org-fleet status [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
+  org-fleet doctor [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
+  org-fleet clone-missing [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
   org-fleet sync [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
   org-fleet version`);
 }
@@ -178,7 +183,7 @@ function selectOrganizations(manifest: Manifest, ids: string[]): Organization[] 
   return selected;
 }
 
-function commandList(orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
+function commandOrgs(orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
   const rows = orgs.map((org) => ({
     id: org.id,
     manifest_repo: org.repo_fleet_manifest.repository,
@@ -196,29 +201,9 @@ function commandList(orgs: Organization[], workspaceRoot: string, jsonOutput: bo
   return 0;
 }
 
-function commandValidate(manifest: Manifest, orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
-  const summary = {
-    valid: true,
-    organizations: manifest.organizations.length,
-    selected_organizations: orgs.length,
-    repo_fleet_manifests: orgs.map((org) => ({
-      organization: org.id,
-      repository: org.repo_fleet_manifest.repository,
-      path: org.repo_fleet_manifest.path,
-      resolved_path: repoFleetManifestPath(org, workspaceRoot),
-    })),
-  };
-  if (jsonOutput) {
-    console.log(JSON.stringify(summary, null, 2));
-  } else {
-    console.log(`manifest is valid (${summary.organizations} organizations)`);
-  }
-  return 0;
-}
-
-function commandPath(manifest: Manifest, workspaceRoot: string, args: string[], jsonOutput: boolean): number {
+function commandManifestPath(manifest: Manifest, workspaceRoot: string, args: string[], jsonOutput: boolean): number {
   if (args.length !== 1) {
-    console.error("path requires exactly one ORG_ID");
+    console.error("manifest-path requires exactly one ORG_ID");
     return 2;
   }
   const org = manifest.organizations.find((candidate) => candidate.id === args[0]);
@@ -239,63 +224,112 @@ function commandPath(manifest: Manifest, workspaceRoot: string, args: string[], 
   return 0;
 }
 
-function commandSync(orgs: Organization[], workspaceRoot: string, dryRun: boolean, jsonOutput: boolean, repoFleetArgs: string[]): number {
-  const plans = orgs.map((org) => planForOrg(org, workspaceRoot));
-  const results = [];
+function commandRepoFleet(
+  manifest: Manifest,
+  orgs: Organization[],
+  workspaceRoot: string,
+  command: string,
+  dryRun: boolean,
+  jsonOutput: boolean,
+  args: string[],
+): number {
+  if (command === "path") {
+    return commandRepoFleetPath(manifest, workspaceRoot, args, jsonOutput);
+  }
+
+  const repoFleetArgs = [...args];
+  if (jsonOutput && !repoFleetArgs.includes("--json")) {
+    repoFleetArgs.push("--json");
+  }
+  if (dryRun && MUTATING_REPO_FLEET_COMMANDS.has(command) && !repoFleetArgs.includes("--dry-run")) {
+    repoFleetArgs.push("--dry-run");
+  }
+
+  const rows = [];
   let ok = true;
 
-  for (const plan of plans) {
-    const org = orgs.find((candidate) => candidate.id === plan.id);
-    if (!org) {
-      continue;
-    }
-    if (!dryRun && plan.manifest_repo_action === "clone") {
+  for (const org of orgs) {
+    let plan = planForOrg(org, workspaceRoot);
+    if (MUTATING_REPO_FLEET_COMMANDS.has(command) && !dryRun && plan.manifest_repo_action === "clone") {
       const cloneResult = cloneManifestRepo(org, workspaceRoot);
       if (cloneResult.status !== 0) {
         ok = false;
-        results.push({ ...plan, ok: false, error: cloneResult.error });
+        rows.push({ organization: org.id, manifest: { ...plan, ok: false, error: cloneResult.error }, status: null, output: null });
         continue;
       }
-    } else if (!dryRun && plan.manifest_repo_action === "fetch") {
+      plan = planForOrg(org, workspaceRoot);
+    } else if (MUTATING_REPO_FLEET_COMMANDS.has(command) && !dryRun && plan.manifest_repo_action === "fetch") {
       const fetchResult = fetchManifestRepo(plan.manifest_repo_path);
       if (fetchResult.status !== 0) {
         ok = false;
-        results.push({ ...plan, ok: false, error: fetchResult.error });
+        rows.push({ organization: org.id, manifest: { ...plan, ok: false, error: fetchResult.error }, status: null, output: null });
         continue;
       }
+      plan = planForOrg(org, workspaceRoot);
     }
 
-    const refreshedPlan = planForOrg(org, workspaceRoot);
-    if (!refreshedPlan.ok) {
+    if (!plan.ok) {
       ok = false;
-      results.push(refreshedPlan);
-      continue;
-    }
-    if (dryRun) {
-      results.push(refreshedPlan);
+      rows.push({ organization: org.id, manifest: plan, status: null, output: null });
       continue;
     }
 
-    const repoFleetResult = runRepoFleetSync(org, workspaceRoot, repoFleetArgs);
+    if (dryRun && MUTATING_REPO_FLEET_COMMANDS.has(command) && plan.manifest_repo_action === "clone") {
+      rows.push({ organization: org.id, manifest: plan, status: 0, output: null });
+      continue;
+    }
+
+    const repoFleetResult = runRepoFleetCommand(org, workspaceRoot, command, repoFleetArgs);
     if (repoFleetResult.status !== 0) {
       ok = false;
-      results.push({ ...refreshedPlan, ok: false, error: repoFleetResult.error });
-      continue;
     }
-    results.push(refreshedPlan);
+    rows.push({
+      organization: org.id,
+      manifest: plan,
+      status: repoFleetResult.status,
+      output: parseRepoFleetOutput(command, repoFleetResult.stdout, jsonOutput),
+      stderr: repoFleetResult.stderr.trim() || null,
+      error: repoFleetResult.status === 0 ? null : repoFleetResult.error,
+    });
   }
 
   if (jsonOutput) {
-    console.log(JSON.stringify(results, null, 2));
+    console.log(JSON.stringify(jsonRows(command, rows), null, 2));
   } else {
-    for (const result of results) {
-      const action = dryRun ? `would-${result.manifest_repo_action}` : result.manifest_repo_action;
-      const state = result.ok ? "ok" : "error";
-      const suffix = result.error ? ` ${result.error}` : "";
-      console.log(`${state} ${result.id} ${action} ${result.repo_fleet_manifest}${suffix}`);
-    }
+    printTextRows(command, rows);
   }
-  return ok && results.every((result) => result.ok) ? 0 : 1;
+  return ok ? 0 : 1;
+}
+
+function commandRepoFleetPath(manifest: Manifest, workspaceRoot: string, args: string[], jsonOutput: boolean): number {
+  if (args.length !== 2) {
+    console.error("path requires ORG_ID and REPO_ID");
+    return 2;
+  }
+  const org = manifest.organizations.find((candidate) => candidate.id === args[0]);
+  if (!org) {
+    console.error(`unknown organization ${args[0]}`);
+    return 2;
+  }
+  const plan = planForOrg(org, workspaceRoot);
+  if (!plan.ok) {
+    console.error(plan.error ?? "repo-fleet manifest is unavailable");
+    return 1;
+  }
+  const result = runRepoFleetCommand(org, workspaceRoot, "path", [args[1]]);
+  if (result.status !== 0) {
+    if (result.stderr.trim()) {
+      console.error(result.stderr.trim());
+    }
+    return result.status;
+  }
+  const repoPath = result.stdout.trim();
+  if (jsonOutput) {
+    console.log(JSON.stringify({ organization: org.id, id: args[1], path: repoPath }, null, 2));
+  } else {
+    console.log(repoPath);
+  }
+  return 0;
 }
 
 function planForOrg(org: Organization, workspaceRoot: string): OrgPlan {
@@ -375,14 +409,103 @@ function fetchManifestRepo(repoPath: string): { status: number; error: string | 
     : { status: result.status ?? 1, error: `${command} ${args.join(" ")} failed` };
 }
 
-function runRepoFleetSync(org: Organization, workspaceRoot: string, extraArgs: string[]): { status: number; error: string | null } {
+function runRepoFleetCommand(
+  org: Organization,
+  workspaceRoot: string,
+  command: string,
+  extraArgs: string[],
+): { status: number; error: string | null; stdout: string; stderr: string } {
   const repoFleetBin = process.env.ORG_FLEET_REPO_FLEET_BIN ?? "repo-fleet";
   const manifestPath = repoFleetManifestPath(org, workspaceRoot);
-  const args = ["sync", "--manifest", manifestPath, ...extraArgs];
-  const result = spawnSync(repoFleetBin, args, { stdio: "inherit" });
+  const args = [command, "--manifest", manifestPath, ...extraArgs];
+  const result = spawnSync(repoFleetBin, args, { encoding: "utf8" });
   return result.status === 0
-    ? { status: 0, error: null }
-    : { status: result.status ?? 1, error: `${repoFleetBin} ${args.join(" ")} failed` };
+    ? { status: 0, error: null, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+    : {
+        status: result.status ?? 1,
+        error: `${repoFleetBin} ${args.join(" ")} failed`,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+      };
+}
+
+function parseRepoFleetOutput(command: string, output: string, jsonOutput: boolean): unknown {
+  if (!jsonOutput) {
+    return output.trimEnd();
+  }
+  if (output.trim().length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(output);
+  } catch {
+    return output.trimEnd();
+  }
+}
+
+function jsonRows(command: string, rows: Array<Record<string, unknown>>): unknown {
+  if (command === "list" || command === "remotes" || command === "status") {
+    return rows.flatMap((row) => {
+      const output = row.output;
+      if (!Array.isArray(output)) {
+        return [row];
+      }
+      return output.map((item) => (isPlainObject(item) ? { organization: row.organization, ...item } : { organization: row.organization, value: item }));
+    });
+  }
+  if (command === "doctor") {
+    return {
+      findings: rows.flatMap((row) => {
+        const output = row.output;
+        if (!isPlainObject(output) || !Array.isArray(output.findings)) {
+          return row.error ? [{ organization: row.organization, severity: "error", message: row.error }] : [];
+        }
+        return output.findings.map((finding) => (isPlainObject(finding) ? { organization: row.organization, ...finding } : finding));
+      }),
+    };
+  }
+  if (command === "validate") {
+    return {
+      valid: rows.every((row) => row.status === 0),
+      organizations: rows.length,
+      results: rows.map((row) => ({
+        organization: row.organization,
+        valid: row.status === 0,
+        manifest: row.manifest,
+        output: row.output,
+        error: row.error,
+      })),
+    };
+  }
+  return rows;
+}
+
+function printTextRows(command: string, rows: Array<Record<string, unknown>>): void {
+  for (const row of rows) {
+    const heading = `# ${row.organization}`;
+    console.log(heading);
+    if (row.error) {
+      console.log(`error: ${row.error}`);
+    }
+    if (row.output) {
+      console.log(row.output);
+    } else if (command === "clone-missing" || command === "sync") {
+      const manifest = row.manifest;
+      if (isPlainObject(manifest)) {
+        const action = manifest.manifest_repo_action;
+        const state = manifest.ok ? "ok" : "error";
+        const suffix = manifest.error ? ` ${manifest.error}` : "";
+        console.log(`${state} manifest-repo ${action} ${manifest.repo_fleet_manifest}${suffix}`);
+      }
+    }
+    if (row.stderr) {
+      console.error(row.stderr);
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function commandAvailable(command: string): boolean {
