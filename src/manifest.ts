@@ -4,6 +4,7 @@ import path from "node:path";
 export interface RepoFleetManifestPointer {
   repository: string;
   path: string;
+  checkout_path?: string;
 }
 
 export interface OrganizationConfig {
@@ -85,6 +86,9 @@ export function validateManifestData(raw: unknown): string[] {
         errors.push(`${prefix}.repo_fleet_manifest.repository is required`);
       }
       validateRelativePath(org.repo_fleet_manifest.path, `${prefix}.repo_fleet_manifest.path`, errors);
+      if (org.repo_fleet_manifest.checkout_path !== undefined) {
+        validateRelativePath(org.repo_fleet_manifest.checkout_path, `${prefix}.repo_fleet_manifest.checkout_path`, errors);
+      }
       if (typeof org.repo_fleet_manifest.repository === "string" && org.repo_fleet_manifest.repository.includes("/")) {
         errors.push(`${prefix}.repo_fleet_manifest.repository must be a repository name, not owner/name`);
       }
@@ -106,6 +110,9 @@ export function manifestRepoRemote(org: Organization): string {
 }
 
 export function manifestRepoPath(org: Organization, workspaceRoot: string): string {
+  if (org.repo_fleet_manifest.checkout_path) {
+    return path.resolve(workspaceRoot, org.repo_fleet_manifest.checkout_path);
+  }
   return path.resolve(workspaceRoot, org.id, org.repo_fleet_manifest.repository);
 }
 
