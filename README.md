@@ -1,9 +1,9 @@
 # org-fleet
 
-`org-fleet` manages a fleet of organizations whose repositories are already
-described by `repo-fleet` manifests. It keeps the organization-level source of
-truth in `org-fleet.json`, ensures each organization's manifest repository is
-available locally, then delegates repository synchronization to `repo-fleet`.
+`org-fleet` manages organizations whose repositories are already described by
+`repo-fleet` manifests. The organization-level manifest only says which
+organizations to visit and which repository/path contains each org's
+`repo-fleet` manifest.
 
 ## Manifest
 
@@ -12,25 +12,26 @@ Create `org-fleet.json` in a meta repository:
 ```json
 {
   "version": 1,
-  "workspace_root": "../..",
   "organizations": [
     {
       "id": "example-org",
-      "vcs_provider": "github",
-      "manifest_repo": {
-        "remote": "git@github.com:example-org/meta.git",
-        "local_path": "example-org/meta",
-        "default_branch": "main"
-      },
-      "manifest_path": "repo-fleet.json"
+      "repo_fleet_manifest": {
+        "repository": "meta",
+        "path": "repo-fleet.json"
+      }
     }
   ]
 }
 ```
 
-`workspace_root` is optional. When present, it is resolved relative to the
-`org-fleet.json` file and becomes the base directory for organization manifest
-repository paths.
+For the example above, `org-fleet` derives the manifest repository remote as
+`git@github.com:example-org/meta.git`, expects the local checkout at
+`<workspace-root>/example-org/meta`, and runs `repo-fleet` against
+`<workspace-root>/example-org/meta/repo-fleet.json`.
+
+By default, `<workspace-root>` is two directories above `org-fleet.json`, which
+matches a layout like `Projects/monarchic-meta/meta/org-fleet.json`. Override it
+with `--workspace-root` when needed.
 
 ## Commands
 
@@ -42,10 +43,10 @@ org-fleet sync --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json -- --dry-run
 ```
 
-`sync` clones missing organization manifest repositories with Jujutsu when
-available, fetches existing manifest repositories, then runs
-`repo-fleet sync --manifest <repo-fleet.json>` for each organization. Arguments
-after `--` are passed to `repo-fleet sync`.
+`sync` loops through each organization, clones missing manifest repositories
+with Jujutsu when available, fetches existing manifest repositories, then runs
+`repo-fleet sync --manifest <repo-fleet.json>` for that organization. Arguments
+after `--` are passed to each `repo-fleet sync` invocation.
 
 ## Development
 
