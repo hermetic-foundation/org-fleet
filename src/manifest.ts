@@ -1,37 +1,28 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-export interface ManifestRepositoryConfig {
-  remote: string;
-  local_path: string;
-  default_branch: string;
+export interface RepoFleetManifestPointer {
+  repository: string;
+  path: string;
 }
 
 export interface OrganizationConfig {
   id: string;
-  vcs_provider?: string;
-  manifest_repo: ManifestRepositoryConfig;
-  manifest_path: string;
-  repo_fleet_workspace_root?: string;
+  repo_fleet_manifest: RepoFleetManifestPointer;
 }
 
 export interface Organization {
   id: string;
-  vcs_provider: string | null;
-  manifest_repo: ManifestRepositoryConfig;
-  manifest_path: string;
-  repo_fleet_workspace_root: string | null;
+  repo_fleet_manifest: RepoFleetManifestPointer;
 }
 
 export interface ManifestData {
   version: 1;
-  workspace_root?: string;
   organizations: OrganizationConfig[];
 }
 
 export interface Manifest {
   version: 1;
-  workspace_root: string | null;
   organizations: Organization[];
   path: string;
   root: string;
@@ -51,13 +42,9 @@ export function loadManifest(manifestPath: string): Manifest {
   const data = raw as ManifestData;
   return {
     version: data.version,
-    workspace_root: data.workspace_root ?? null,
     organizations: data.organizations.map((org) => ({
       id: org.id,
-      vcs_provider: org.vcs_provider ?? null,
-      manifest_repo: org.manifest_repo,
-      manifest_path: org.manifest_path,
-      repo_fleet_workspace_root: org.repo_fleet_workspace_root ?? null,
+      repo_fleet_manifest: org.repo_fleet_manifest,
     })),
     path: manifestPath,
     root: path.dirname(path.resolve(manifestPath)),
@@ -72,16 +59,12 @@ export function validateManifestData(raw: unknown): string[] {
   if (raw.version !== 1) {
     errors.push("version must be 1");
   }
-  if (raw.workspace_root !== undefined) {
-    validateRelativePath(raw.workspace_root, "workspace_root", errors);
-  }
   if (!Array.isArray(raw.organizations)) {
     errors.push("organizations must be an array");
     return errors;
   }
 
   const seenIds = new Set<string>();
-  const seenLocalPaths = new Set<string>();
   for (const [index, org] of raw.organizations.entries()) {
     const prefix = `organizations[${index}]`;
     if (!isPlainObject(org)) {
@@ -95,29 +78,16 @@ export function validateManifestData(raw: unknown): string[] {
     } else {
       seenIds.add(org.id);
     }
-    if (org.vcs_provider !== undefined && !nonEmptyString(org.vcs_provider)) {
-      errors.push(`${prefix}.vcs_provider must be a non-empty string`);
-    }
-    if (!isPlainObject(org.manifest_repo)) {
-      errors.push(`${prefix}.manifest_repo must be an object`);
+    if (!isPlainObject(org.repo_fleet_manifest)) {
+      errors.push(`${prefix}.repo_fleet_manifest must be an object`);
     } else {
-      for (const field of ["remote", "local_path", "default_branch"]) {
-        if (!nonEmptyString(org.manifest_repo[field])) {
-          errors.push(`${prefix}.manifest_repo.${field} is required`);
-        }
+      if (!nonEmptyString(org.repo_fleet_manifest.repository)) {
+        errors.push(`${prefix}.repo_fleet_manifest.repository is required`);
       }
-      if (typeof org.manifest_repo.local_path === "string") {
-        validateRelativePath(org.manifest_repo.local_path, `${prefix}.manifest_repo.local_path`, errors);
-        if (seenLocalPaths.has(org.manifest_repo.local_path)) {
-          errors.push(`${prefix}.manifest_repo.local_path duplicates ${org.manifest_repo.local_path}`);
-        } else {
-          seenLocalPaths.add(org.manifest_repo.local_path);
-        }
+      validateRelativePath(org.repo_fleet_manifest.path, `${prefix}.repo_fleet_manifest.path`, errors);
+      if (typeof org.repo_fleet_manifest.repository === "string" && org.repo_fleet_manifest.repository.includes("/")) {
+        errors.push(`${prefix}.repo_fleet_manifest.repository must be a repository name, not owner/name`);
       }
-    }
-    validateRelativePath(org.manifest_path, `${prefix}.manifest_path`, errors);
-    if (org.repo_fleet_workspace_root !== undefined) {
-      validateRelativePath(org.repo_fleet_workspace_root, `${prefix}.repo_fleet_workspace_root`, errors);
     }
   }
 
@@ -128,25 +98,19 @@ export function resolveWorkspaceRoot(manifest: Manifest, override?: string | nul
   if (override) {
     return path.resolve(override);
   }
-  if (manifest.workspace_root) {
-    return path.resolve(manifest.root, manifest.workspace_root);
-  }
-  return manifest.root;
+  return path.resolve(manifest.root, "..", "..");
+}
+
+export function manifestRepoRemote(org: Organization): string {
+  return `git@github.com:${org.id}/${org.repo_fleet_manifest.repository}.git`;
 }
 
 export function manifestRepoPath(org: Organization, workspaceRoot: string): string {
-  return path.resolve(workspaceRoot, org.manifest_repo.local_path);
+  return path.resolve(workspaceRoot, org.id, org.repo_fleet_manifest.repository);
 }
 
 export function repoFleetManifestPath(org: Organization, workspaceRoot: string): string {
-  return path.resolve(manifestRepoPath(org, workspaceRoot), org.manifest_path);
-}
-
-export function repoFleetWorkspaceRoot(org: Organization, workspaceRoot: string): string | null {
-  if (!org.repo_fleet_workspace_root) {
-    return null;
-  }
-  return path.resolve(manifestRepoPath(org, workspaceRoot), org.repo_fleet_workspace_root);
+  return path.resolve(manifestRepoPath(org, workspaceRoot), org.repo_fleet_manifest.path);
 }
 
 function validateRelativePath(value: unknown, field: string, errors: string[]): void {

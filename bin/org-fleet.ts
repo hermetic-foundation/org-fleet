@@ -5,9 +5,9 @@ import process from "node:process";
 
 import {
   loadManifest,
+  manifestRepoRemote,
   manifestRepoPath,
   repoFleetManifestPath,
-  repoFleetWorkspaceRoot,
   resolveWorkspaceRoot,
 } from "../src/manifest.ts";
 import type { Manifest, Organization } from "../src/manifest.ts";
@@ -181,8 +181,8 @@ function selectOrganizations(manifest: Manifest, ids: string[]): Organization[] 
 function commandList(orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
   const rows = orgs.map((org) => ({
     id: org.id,
-    vcs_provider: org.vcs_provider,
-    manifest_repo_remote: org.manifest_repo.remote,
+    manifest_repo: org.repo_fleet_manifest.repository,
+    manifest_repo_remote: manifestRepoRemote(org),
     manifest_repo_path: manifestRepoPath(org, workspaceRoot),
     repo_fleet_manifest: repoFleetManifestPath(org, workspaceRoot),
   }));
@@ -197,28 +197,23 @@ function commandList(orgs: Organization[], workspaceRoot: string, jsonOutput: bo
 }
 
 function commandValidate(manifest: Manifest, orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
-  const plans = orgs.map((org) => planForOrg(org, workspaceRoot));
   const summary = {
-    valid: plans.every((plan) => plan.ok),
+    valid: true,
     organizations: manifest.organizations.length,
     selected_organizations: orgs.length,
-    findings: plans
-      .filter((plan) => !plan.ok)
-      .map((plan) => ({
-        organization: plan.id,
-        message: plan.error,
-      })),
+    repo_fleet_manifests: orgs.map((org) => ({
+      organization: org.id,
+      repository: org.repo_fleet_manifest.repository,
+      path: org.repo_fleet_manifest.path,
+      resolved_path: repoFleetManifestPath(org, workspaceRoot),
+    })),
   };
   if (jsonOutput) {
     console.log(JSON.stringify(summary, null, 2));
-  } else if (summary.valid) {
-    console.log(`manifest is valid (${summary.organizations} organizations)`);
   } else {
-    for (const finding of summary.findings) {
-      console.log(`error ${finding.organization}: ${finding.message}`);
-    }
+    console.log(`manifest is valid (${summary.organizations} organizations)`);
   }
-  return summary.valid ? 0 : 1;
+  return 0;
 }
 
 function commandPath(manifest: Manifest, workspaceRoot: string, args: string[], jsonOutput: boolean): number {
@@ -361,8 +356,8 @@ function cloneManifestRepo(org: Organization, workspaceRoot: string): { status: 
   const destination = manifestRepoPath(org, workspaceRoot);
   const parent = path.dirname(destination);
   const args = commandAvailable("jj")
-    ? ["git", "clone", "--colocate", org.manifest_repo.remote, destination]
-    : ["clone", org.manifest_repo.remote, destination];
+    ? ["git", "clone", "--colocate", manifestRepoRemote(org), destination]
+    : ["clone", manifestRepoRemote(org), destination];
   const command = commandAvailable("jj") ? "jj" : "git";
   const result = spawnSync(command, args, { cwd: parent, stdio: "inherit" });
   return result.status === 0
@@ -384,10 +379,6 @@ function runRepoFleetSync(org: Organization, workspaceRoot: string, extraArgs: s
   const repoFleetBin = process.env.ORG_FLEET_REPO_FLEET_BIN ?? "repo-fleet";
   const manifestPath = repoFleetManifestPath(org, workspaceRoot);
   const args = ["sync", "--manifest", manifestPath, ...extraArgs];
-  const orgWorkspaceRoot = repoFleetWorkspaceRoot(org, workspaceRoot);
-  if (orgWorkspaceRoot) {
-    args.push("--workspace-root", orgWorkspaceRoot);
-  }
   const result = spawnSync(repoFleetBin, args, { stdio: "inherit" });
   return result.status === 0
     ? { status: 0, error: null }
