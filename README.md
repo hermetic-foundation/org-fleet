@@ -29,6 +29,9 @@ For the example above, `org-fleet` derives the manifest repository remote as
 `<workspace-root>/example-org/meta`, and runs `repo-fleet` against
 `<workspace-root>/example-org/meta/repo-fleet.json`.
 
+If an existing workspace uses a different checkout path for the manifest
+repository, set `repo_fleet_manifest.checkout_path` to that relative path.
+
 By default, `<workspace-root>` is two directories above `org-fleet.json`, which
 matches a layout like `Projects/monarchic-meta/meta/org-fleet.json`. Override it
 with `--workspace-root` when needed.

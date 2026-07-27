@@ -54,6 +54,15 @@ test("absolute paths are rejected", () => {
   assert.ok(errors.some((error) => error.includes("repo_fleet_manifest.path must be relative")));
 });
 
+test("absolute checkout paths are rejected", () => {
+  const manifest = validManifest();
+  manifest.organizations[0].repo_fleet_manifest.checkout_path = "/tmp/example-org/meta";
+
+  const errors = validateManifestData(manifest);
+
+  assert.ok(errors.some((error) => error.includes("repo_fleet_manifest.checkout_path must be relative")));
+});
+
 test("manifest paths resolve from workspace root and manifest repository", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
   const manifestPath = path.join(root, "monarchic-meta", "meta", "org-fleet.json");
@@ -67,6 +76,22 @@ test("manifest paths resolve from workspace root and manifest repository", () =>
   assert.equal(workspaceRoot, root);
   assert.equal(manifestRepoPath(org, workspaceRoot), path.join(root, "example-org", "meta"));
   assert.equal(repoFleetManifestPath(org, workspaceRoot), path.join(root, "example-org", "meta", "repo-fleet.json"));
+});
+
+test("manifest repository checkout path can be overridden", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const manifestPath = path.join(root, "monarchic-meta", "meta", "org-fleet.json");
+  const data = validManifest();
+  data.organizations[0].repo_fleet_manifest.checkout_path = "example-org/meta/meta";
+  mkdirSync(path.dirname(manifestPath), { recursive: true });
+  writeFileSync(manifestPath, JSON.stringify(data), "utf8");
+
+  const manifest = loadManifest(manifestPath);
+  const workspaceRoot = resolveWorkspaceRoot(manifest);
+  const org = manifest.organizations[0];
+
+  assert.equal(manifestRepoPath(org, workspaceRoot), path.join(root, "example-org", "meta", "meta"));
+  assert.equal(repoFleetManifestPath(org, workspaceRoot), path.join(root, "example-org", "meta", "meta", "repo-fleet.json"));
 });
 
 test("sync dry-run plans a clone for missing manifest repository", () => {
