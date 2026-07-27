@@ -53,7 +53,7 @@
 
             meta = {
               description = "Manage repo-fleet manifests across multiple organizations";
-              homepage = "https://github.com/monarchic-meta/org-fleet";
+              homepage = "https://github.com/hermetic-foundation/org-fleet";
               license = pkgs.lib.licenses.agpl3Plus;
               mainProgram = "org-fleet";
             };
