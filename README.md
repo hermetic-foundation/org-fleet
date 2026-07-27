@@ -39,17 +39,36 @@ with `--workspace-root` when needed.
 ## Commands
 
 ```bash
-org-fleet list --manifest org-fleet.json
+org-fleet orgs --manifest org-fleet.json
 org-fleet validate --manifest org-fleet.json
-org-fleet path example-org --manifest org-fleet.json
+org-fleet list --manifest org-fleet.json
+org-fleet path example-org api --manifest org-fleet.json
+org-fleet remotes --manifest org-fleet.json
+org-fleet status --manifest org-fleet.json
+org-fleet doctor --manifest org-fleet.json
+org-fleet clone-missing --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json -- --dry-run
 ```
 
-`sync` loops through each organization, clones missing manifest repositories
-with Jujutsu when available, fetches existing manifest repositories, then runs
-`repo-fleet sync --manifest <repo-fleet.json>` for that organization. Arguments
-after `--` are passed to each `repo-fleet sync` invocation.
+The repo-fleet-shaped commands run against every selected organization:
+`list`, `validate`, `remotes`, `status`, `doctor`, `clone-missing`, and `sync`.
+Use `--org ORG` to restrict the run to one organization. `path` takes an
+organization id and a repo or worktree id, then delegates to that org's
+`repo-fleet path`.
+
+`clone-missing` and `sync` first make sure each organization manifest repository
+is available locally. Missing manifest repositories are cloned with Jujutsu when
+available, existing Jujutsu manifest repositories are fetched with
+`jj git fetch`, and repo-fleet receives `--dry-run` when org-fleet does.
+Arguments after `--` are passed to each repo-fleet invocation.
+
+Use `orgs` and `manifest-path` for the organization index itself:
+
+```bash
+org-fleet orgs --manifest org-fleet.json
+org-fleet manifest-path example-org --manifest org-fleet.json
+```
 
 ## Development
 

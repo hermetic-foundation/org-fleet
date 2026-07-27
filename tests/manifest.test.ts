@@ -153,3 +153,71 @@ test("sync invokes repo-fleet for organizations with manifests", () => {
     }
   }
 });
+
+test("orgs lists organization manifest pointers", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const manifestPath = path.join(root, "org-fleet.json");
+  const data = validManifest();
+  writeFileSync(manifestPath, JSON.stringify(data), "utf8");
+
+  assert.equal(main(["orgs", "--manifest", manifestPath, "--workspace-root", root, "--json"]), 0);
+});
+
+test("list aggregates repo-fleet list output", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const binDir = path.join(root, "bin");
+  mkdirSync(binDir);
+  const repoFleet = path.join(binDir, "repo-fleet");
+  writeFileSync(
+    repoFleet,
+    "#!/bin/sh\nif [ \"$1\" = list ]; then printf '[{\"id\":\"api\"}]\\n'; exit 0; fi\nexit 1\n",
+    "utf8",
+  );
+  chmodSync(repoFleet, 0o755);
+  const data = validManifest();
+  const manifestPath = path.join(root, "org-fleet.json");
+  writeFileSync(manifestPath, JSON.stringify(data), "utf8");
+  const orgMeta = path.join(root, "example-org", "meta");
+  mkdirSync(path.join(orgMeta, ".git"), { recursive: true });
+  writeFileSync(path.join(orgMeta, "repo-fleet.json"), JSON.stringify({ version: 1 }), "utf8");
+
+  const previousBin = process.env.ORG_FLEET_REPO_FLEET_BIN;
+  process.env.ORG_FLEET_REPO_FLEET_BIN = repoFleet;
+  try {
+    assert.equal(main(["list", "--manifest", manifestPath, "--workspace-root", root, "--json"]), 0);
+  } finally {
+    if (previousBin === undefined) {
+      delete process.env.ORG_FLEET_REPO_FLEET_BIN;
+    } else {
+      process.env.ORG_FLEET_REPO_FLEET_BIN = previousBin;
+    }
+  }
+});
+
+test("path delegates to a selected organization's repo-fleet manifest", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const binDir = path.join(root, "bin");
+  mkdirSync(binDir);
+  const repoFleet = path.join(binDir, "repo-fleet");
+  const repoPath = path.join(root, "example-org", "api");
+  writeFileSync(repoFleet, `#!/bin/sh\nif [ "$1" = path ]; then printf '%s\\n' ${JSON.stringify(repoPath)}; exit 0; fi\nexit 1\n`, "utf8");
+  chmodSync(repoFleet, 0o755);
+  const data = validManifest();
+  const manifestPath = path.join(root, "org-fleet.json");
+  writeFileSync(manifestPath, JSON.stringify(data), "utf8");
+  const orgMeta = path.join(root, "example-org", "meta");
+  mkdirSync(path.join(orgMeta, ".git"), { recursive: true });
+  writeFileSync(path.join(orgMeta, "repo-fleet.json"), JSON.stringify({ version: 1 }), "utf8");
+
+  const previousBin = process.env.ORG_FLEET_REPO_FLEET_BIN;
+  process.env.ORG_FLEET_REPO_FLEET_BIN = repoFleet;
+  try {
+    assert.equal(main(["path", "example-org", "api", "--manifest", manifestPath, "--workspace-root", root, "--json"]), 0);
+  } finally {
+    if (previousBin === undefined) {
+      delete process.env.ORG_FLEET_REPO_FLEET_BIN;
+    } else {
+      process.env.ORG_FLEET_REPO_FLEET_BIN = previousBin;
+    }
+  }
+});
