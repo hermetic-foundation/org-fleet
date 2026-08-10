@@ -30,11 +30,11 @@ interface ParsedArgs {
 
 interface OrgPlan {
   id: string;
-  manifest_repo_path: string;
+  manifest_repo_path: string | null;
   repo_fleet_manifest: string;
   manifest_repo_exists: boolean;
   manifest_exists: boolean;
-  manifest_repo_action: "skip" | "clone" | "fetch";
+  manifest_repo_action: "skip" | "clone" | "fetch" | "resolve-flake";
   ok: boolean;
   error: string | null;
 }
@@ -186,9 +186,9 @@ function selectOrganizations(manifest: Manifest, ids: string[]): Organization[] 
 function commandOrgs(orgs: Organization[], workspaceRoot: string, jsonOutput: boolean): number {
   const rows = orgs.map((org) => ({
     id: org.id,
-    manifest_repo: org.repo_fleet_manifest.repository,
-    manifest_repo_remote: manifestRepoRemote(org),
-    manifest_repo_path: manifestRepoPath(org, workspaceRoot),
+    manifest_repo: org.repo_fleet_manifest.repository ?? null,
+    manifest_repo_remote: org.repo_fleet_manifest.flake ? null : manifestRepoRemote(org),
+    manifest_repo_path: org.repo_fleet_manifest.flake ? null : manifestRepoPath(org, workspaceRoot),
     repo_fleet_manifest: repoFleetManifestPath(org, workspaceRoot),
   }));
   if (jsonOutput) {
@@ -213,7 +213,7 @@ function commandManifestPath(manifest: Manifest, workspaceRoot: string, args: st
   }
   const row = {
     id: org.id,
-    manifest_repo_path: manifestRepoPath(org, workspaceRoot),
+    manifest_repo_path: org.repo_fleet_manifest.flake ? null : manifestRepoPath(org, workspaceRoot),
     repo_fleet_manifest: repoFleetManifestPath(org, workspaceRoot),
   };
   if (jsonOutput) {
@@ -259,7 +259,7 @@ function commandRepoFleet(
       }
       plan = planForOrg(org, workspaceRoot);
     } else if (MUTATING_REPO_FLEET_COMMANDS.has(command) && !dryRun && plan.manifest_repo_action === "fetch") {
-      const fetchResult = fetchManifestRepo(plan.manifest_repo_path);
+      const fetchResult = fetchManifestRepo(plan.manifest_repo_path!);
       if (fetchResult.status !== 0) {
         ok = false;
         rows.push({ organization: org.id, manifest: { ...plan, ok: false, error: fetchResult.error }, status: null, output: null });
@@ -271,6 +271,18 @@ function commandRepoFleet(
     if (!plan.ok) {
       ok = false;
       rows.push({ organization: org.id, manifest: plan, status: null, output: null });
+      continue;
+    }
+
+    if (!MUTATING_REPO_FLEET_COMMANDS.has(command) && plan.manifest_repo_action === "clone") {
+      ok = false;
+      rows.push({
+        organization: org.id,
+        manifest: plan,
+        status: null,
+        output: null,
+        error: `repo-fleet manifest is not materialized at ${plan.repo_fleet_manifest}; run org-fleet sync or clone-missing first`,
+      });
       continue;
     }
 
@@ -289,7 +301,7 @@ function commandRepoFleet(
       status: repoFleetResult.status,
       output: parseRepoFleetOutput(command, repoFleetResult.stdout, jsonOutput),
       stderr: repoFleetResult.stderr.trim() || null,
-      error: repoFleetResult.status === 0 ? null : repoFleetResult.error,
+      error: repoFleetResult.status === 0 || repoFleetResult.stdout.trim().length > 0 ? null : repoFleetResult.error,
     });
   }
 
@@ -333,6 +345,18 @@ function commandRepoFleetPath(manifest: Manifest, workspaceRoot: string, args: s
 }
 
 function planForOrg(org: Organization, workspaceRoot: string): OrgPlan {
+  if (org.repo_fleet_manifest.flake) {
+    return {
+      id: org.id,
+      manifest_repo_path: null,
+      repo_fleet_manifest: repoFleetManifestPath(org, workspaceRoot),
+      manifest_repo_exists: false,
+      manifest_exists: true,
+      manifest_repo_action: "resolve-flake",
+      ok: true,
+      error: null,
+    };
+  }
   const repoPath = manifestRepoPath(org, workspaceRoot);
   const manifestPath = repoFleetManifestPath(org, workspaceRoot);
   const repoExists = existsSync(repoPath);
@@ -371,7 +395,7 @@ function planForOrg(org: Organization, workspaceRoot: string): OrgPlan {
       manifest_exists: false,
       manifest_repo_action: "fetch",
       ok: false,
-      error: "repo-fleet manifest is missing",
+      error: "repo-fleet manifest is not materialized; run org-fleet sync or clone-missing first",
     };
   }
   return {
@@ -386,27 +410,66 @@ function planForOrg(org: Organization, workspaceRoot: string): OrgPlan {
   };
 }
 
-function cloneManifestRepo(org: Organization, workspaceRoot: string): { status: number; error: string | null } {
+interface VcsResult {
+  status: number;
+  error: string | null;
+  stdout: string;
+  stderr: string;
+  attempts: number;
+}
+
+function cloneManifestRepo(org: Organization, workspaceRoot: string): VcsResult {
   const destination = manifestRepoPath(org, workspaceRoot);
   const parent = path.dirname(destination);
   const args = commandAvailable("jj")
     ? ["git", "clone", "--colocate", manifestRepoRemote(org), destination]
     : ["clone", manifestRepoRemote(org), destination];
   const command = commandAvailable("jj") ? "jj" : "git";
-  const result = spawnSync(command, args, { cwd: parent, stdio: "inherit" });
-  return result.status === 0
-    ? { status: 0, error: null }
-    : { status: result.status ?? 1, error: `${command} ${args.join(" ")} failed` };
+  return runVcsWithRetries(command, args, parent, `clone manifest repository for ${org.id}`);
 }
 
-function fetchManifestRepo(repoPath: string): { status: number; error: string | null } {
+function fetchManifestRepo(repoPath: string): VcsResult {
   const isJjRepo = existsSync(path.join(repoPath, ".jj"));
   const command = isJjRepo && commandAvailable("jj") ? "jj" : "git";
   const args = command === "jj" ? ["git", "fetch"] : ["fetch", "--all", "--prune"];
-  const result = spawnSync(command, args, { cwd: repoPath, stdio: "inherit" });
-  return result.status === 0
-    ? { status: 0, error: null }
-    : { status: result.status ?? 1, error: `${command} ${args.join(" ")} failed` };
+  return runVcsWithRetries(command, args, repoPath, `fetch manifest repository ${repoPath}`);
+}
+
+function runVcsWithRetries(command: string, args: string[], cwd: string, operation: string): VcsResult {
+  const retries = nonNegativeInteger(process.env.ORG_FLEET_VCS_RETRIES, 2);
+  let last = { status: 1, stdout: "", stderr: "", detail: "command did not run" };
+  for (let attempt = 1; attempt <= retries + 1; attempt += 1) {
+    const result = spawnSync(command, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const status = result.status ?? 1;
+    const stdout = result.stdout ?? "";
+    const stderr = result.stderr ?? "";
+    const detail = result.error?.message ?? (stderr.trim() || stdout.trim() || `${command} exited ${status}`);
+    last = { status, stdout, stderr, detail };
+    if (status === 0 && !result.error) {
+      return { status: 0, error: null, stdout, stderr, attempts: attempt };
+    }
+    if (attempt > retries || !isTransientVcsFailure(detail)) {
+      return {
+        status,
+        error: `${operation} failed after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${detail}`,
+        stdout,
+        stderr,
+        attempts: attempt,
+      };
+    }
+  }
+  return { status: last.status, error: `${operation} failed: ${last.detail}`, stdout: last.stdout, stderr: last.stderr, attempts: retries + 1 };
+}
+
+function isTransientVcsFailure(detail: string): boolean {
+  return /timed? out|temporar(?:y|ily)|connection (?:reset|closed|refused)|could not resolve|network is unreachable|early eof|remote end hung up|http (?:5\d\d|429)/i.test(detail);
+}
+
+function nonNegativeInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || !/^\d+$/.test(value)) {
+    return fallback;
+  }
+  return Number.parseInt(value, 10);
 }
 
 function runRepoFleetCommand(
@@ -417,7 +480,10 @@ function runRepoFleetCommand(
 ): { status: number; error: string | null; stdout: string; stderr: string } {
   const repoFleetBin = process.env.ORG_FLEET_REPO_FLEET_BIN ?? "repo-fleet";
   const manifestPath = repoFleetManifestPath(org, workspaceRoot);
-  const args = [command, "--manifest", manifestPath, ...extraArgs];
+  const flakeWorkspaceArgs = org.repo_fleet_manifest.flake && !extraArgs.includes("--workspace-root")
+    ? ["--workspace-root", path.resolve(workspaceRoot, org.id)]
+    : [];
+  const args = [command, "--manifest", manifestPath, ...flakeWorkspaceArgs, ...extraArgs];
   const result = spawnSync(repoFleetBin, args, { encoding: "utf8" });
   return result.status === 0
     ? { status: 0, error: null, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
