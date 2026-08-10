@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -32,6 +32,62 @@ function validManifest(): ManifestData {
 
 test("valid manifest has no errors", () => {
   assert.deepEqual(validateManifestData(validManifest()), []);
+});
+
+test("org manifest accepts flake-backed repo-fleet pointers", () => {
+  const manifest = validManifest();
+  manifest.organizations[0].repo_fleet_manifest = {
+    flake: "git+ssh://git@github.com/example-org/meta.git",
+    attribute: "repoFleetManifest",
+  };
+  assert.deepEqual(validateManifestData(manifest), []);
+});
+
+test("loadManifest evaluates explicit flake sources without building", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const fakeBin = path.join(root, "bin");
+  const argsPath = path.join(root, "nix.args");
+  mkdirSync(fakeBin);
+  writeFileSync(
+    path.join(fakeBin, "nix"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" > ${JSON.stringify(argsPath)}\nprintf '%s\\n' ${JSON.stringify(JSON.stringify(validManifest()))}\n`,
+    "utf8",
+  );
+  chmodSync(path.join(fakeBin, "nix"), 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
+  try {
+    const manifest = loadManifest("flake:github:example/meta#orgFleetManifest");
+    assert.equal(manifest.organizations[0].id, "example-org");
+    assert.equal(readFileSync(argsPath, "utf8").trim(), "eval --option substituters  --json github:example/meta#orgFleetManifest");
+  } finally {
+    process.env.PATH = originalPath;
+  }
+});
+
+test("flake-backed repo-fleet pointers delegate without cloning a manifest repository", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const binDir = path.join(root, "bin");
+  const logPath = path.join(root, "repo-fleet.log");
+  mkdirSync(binDir);
+  const repoFleet = path.join(binDir, "repo-fleet");
+  writeFileSync(repoFleet, `#!/bin/sh\nprintf '%s\\n' "$*" > ${JSON.stringify(logPath)}\n`, "utf8");
+  chmodSync(repoFleet, 0o755);
+  const manifest = validManifest();
+  manifest.organizations[0].repo_fleet_manifest = { flake: "github:example-org/meta", attribute: "repoFleetManifest" };
+  const manifestPath = path.join(root, "org-fleet.json");
+  writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  const previousBin = process.env.ORG_FLEET_REPO_FLEET_BIN;
+  process.env.ORG_FLEET_REPO_FLEET_BIN = repoFleet;
+  try {
+    assert.equal(main(["sync", "--manifest", manifestPath, "--workspace-root", root]), 0);
+    const invocation = readFileSync(logPath, "utf8");
+    assert.match(invocation, /--manifest flake:github:example-org\/meta#repoFleetManifest/);
+    assert.match(invocation, new RegExp(`--workspace-root ${path.join(root, "example-org")}`));
+  } finally {
+    if (previousBin === undefined) delete process.env.ORG_FLEET_REPO_FLEET_BIN;
+    else process.env.ORG_FLEET_REPO_FLEET_BIN = previousBin;
+  }
 });
 
 test("duplicate organization ids are rejected", () => {
@@ -116,7 +172,7 @@ test("plan reports missing repo-fleet manifest in existing manifest repository",
   const plan = planForOrg(org, root);
 
   assert.equal(plan.ok, false);
-  assert.equal(plan.error, "repo-fleet manifest is missing");
+  assert.equal(plan.error, "repo-fleet manifest is not materialized; run org-fleet sync or clone-missing first");
 });
 
 test("sync invokes repo-fleet for organizations with manifests", () => {
