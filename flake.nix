@@ -46,7 +46,7 @@
               chmod +x "$out/lib/org-fleet/bin/org-fleet"
               makeWrapper "$out/lib/org-fleet/bin/org-fleet" "$out/bin/org-fleet" \
                 --set ORG_FLEET_REPO_FLEET_BIN "${repoFleet}/bin/repo-fleet" \
-                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.jujutsu pkgs.nodejs_24 ]}
+                --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.jujutsu pkgs.nix pkgs.nodejs_24 ]}
 
               runHook postInstall
             '';
@@ -86,6 +86,7 @@
             packages = [
               pkgs.git
               pkgs.jujutsu
+              pkgs.nix
               pkgs.nodejs_24
               repo-fleet.packages.${system}.repo-fleet
             ];
