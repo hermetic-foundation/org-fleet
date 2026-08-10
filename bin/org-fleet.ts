@@ -14,7 +14,7 @@ import type { Manifest, Organization } from "../src/manifest.ts";
 
 const VERSION = "0.1.0";
 const DEFAULT_MANIFEST = "org-fleet.json";
-const REPO_FLEET_COMMANDS = new Set(["list", "validate", "path", "remotes", "status", "doctor", "clone-missing", "sync"]);
+const REPO_FLEET_COMMANDS = new Set(["list", "validate", "path", "remotes", "status", "doctor", "clone-missing", "sync", "reconcile"]);
 const MUTATING_REPO_FLEET_COMMANDS = new Set(["clone-missing", "sync"]);
 
 interface ParsedArgs {
@@ -23,6 +23,7 @@ interface ParsedArgs {
   workspaceRoot: string | null;
   json: boolean;
   dryRun: boolean;
+  write: boolean;
   orgs: string[];
   args: string[];
   error: string | null;
@@ -72,7 +73,7 @@ function main(argv: string[]): number {
     return commandManifestPath(manifest, workspaceRoot, parsed.args, parsed.json);
   }
   if (parsed.command && REPO_FLEET_COMMANDS.has(parsed.command)) {
-    return commandRepoFleet(manifest, orgs, workspaceRoot, parsed.command, parsed.dryRun, parsed.json, parsed.args);
+    return commandRepoFleet(manifest, orgs, workspaceRoot, parsed.command, parsed.dryRun, parsed.write, parsed.json, parsed.args);
   }
 
   console.error(`unknown command ${parsed.command}`);
@@ -87,6 +88,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     workspaceRoot: null,
     json: false,
     dryRun: false,
+    write: false,
     orgs: [],
     args: [],
     error: null,
@@ -132,6 +134,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.json = true;
     } else if (arg === "--dry-run") {
       result.dryRun = true;
+    } else if (arg === "--write") {
+      result.write = true;
     } else if (arg === "--") {
       result.args.push(...args);
       break;
@@ -141,6 +145,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else {
       result.args.push(arg);
     }
+  }
+  if (result.write && result.command !== "reconcile") {
+    result.error = "--write is only valid with reconcile";
+  } else if (result.write && result.dryRun) {
+    result.error = "--write and --dry-run are mutually exclusive";
   }
   return result;
 }
@@ -164,6 +173,7 @@ function printUsage(): void {
   org-fleet doctor [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
   org-fleet clone-missing [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
   org-fleet sync [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
+  org-fleet reconcile [--manifest PATH] [--workspace-root PATH] [--org ORG] [--write | --dry-run] [--json] [-- REPO_FLEET_ARGS...]
   org-fleet version`);
 }
 
@@ -230,6 +240,7 @@ function commandRepoFleet(
   workspaceRoot: string,
   command: string,
   dryRun: boolean,
+  write: boolean,
   jsonOutput: boolean,
   args: string[],
 ): number {
@@ -244,13 +255,28 @@ function commandRepoFleet(
   if (dryRun && MUTATING_REPO_FLEET_COMMANDS.has(command) && !repoFleetArgs.includes("--dry-run")) {
     repoFleetArgs.push("--dry-run");
   }
+  const reconcileWrite = command === "reconcile" && (write || repoFleetArgs.includes("--write"));
+  const reconcileDryRun = command === "reconcile" && (dryRun || repoFleetArgs.includes("--dry-run"));
+  if (reconcileWrite && reconcileDryRun) {
+    console.error("--write and --dry-run are mutually exclusive");
+    return 2;
+  }
+  if (command === "reconcile") {
+    if (reconcileWrite && !repoFleetArgs.includes("--write")) {
+      repoFleetArgs.push("--write");
+    } else if (reconcileDryRun && !repoFleetArgs.includes("--dry-run")) {
+      repoFleetArgs.push("--dry-run");
+    }
+  }
+
+  const mutatesManifest = MUTATING_REPO_FLEET_COMMANDS.has(command) || reconcileWrite;
 
   const rows = [];
   let ok = true;
 
   for (const org of orgs) {
     let plan = planForOrg(org, workspaceRoot);
-    if (MUTATING_REPO_FLEET_COMMANDS.has(command) && !dryRun && plan.manifest_repo_action === "clone") {
+    if (mutatesManifest && !dryRun && plan.manifest_repo_action === "clone") {
       const cloneResult = cloneManifestRepo(org, workspaceRoot);
       if (cloneResult.status !== 0) {
         ok = false;
@@ -258,7 +284,7 @@ function commandRepoFleet(
         continue;
       }
       plan = planForOrg(org, workspaceRoot);
-    } else if (MUTATING_REPO_FLEET_COMMANDS.has(command) && !dryRun && plan.manifest_repo_action === "fetch") {
+    } else if (mutatesManifest && !dryRun && plan.manifest_repo_action === "fetch") {
       const fetchResult = fetchManifestRepo(plan.manifest_repo_path!);
       if (fetchResult.status !== 0) {
         ok = false;
@@ -274,7 +300,7 @@ function commandRepoFleet(
       continue;
     }
 
-    if (!MUTATING_REPO_FLEET_COMMANDS.has(command) && plan.manifest_repo_action === "clone") {
+    if (!mutatesManifest && plan.manifest_repo_action === "clone") {
       ok = false;
       rows.push({
         organization: org.id,
@@ -286,7 +312,7 @@ function commandRepoFleet(
       continue;
     }
 
-    if (dryRun && MUTATING_REPO_FLEET_COMMANDS.has(command) && plan.manifest_repo_action === "clone") {
+    if (dryRun && mutatesManifest && plan.manifest_repo_action === "clone") {
       rows.push({ organization: org.id, manifest: plan, status: 0, output: null });
       continue;
     }
@@ -330,8 +356,14 @@ function commandRepoFleetPath(manifest: Manifest, workspaceRoot: string, args: s
   }
   const result = runRepoFleetCommand(org, workspaceRoot, "path", [args[1]]);
   if (result.status !== 0) {
+    if (result.stdout.trim()) {
+      console.log(result.stdout.trimEnd());
+    }
     if (result.stderr.trim()) {
       console.error(result.stderr.trim());
+    }
+    if (result.error) {
+      console.error(result.error);
     }
     return result.status;
   }
@@ -418,6 +450,13 @@ interface VcsResult {
   attempts: number;
 }
 
+interface RepoFleetCommandResult {
+  status: number;
+  error: string | null;
+  stdout: string;
+  stderr: string;
+}
+
 function cloneManifestRepo(org: Organization, workspaceRoot: string): VcsResult {
   const destination = manifestRepoPath(org, workspaceRoot);
   const parent = path.dirname(destination);
@@ -477,7 +516,7 @@ function runRepoFleetCommand(
   workspaceRoot: string,
   command: string,
   extraArgs: string[],
-): { status: number; error: string | null; stdout: string; stderr: string } {
+): RepoFleetCommandResult {
   const repoFleetBin = process.env.ORG_FLEET_REPO_FLEET_BIN ?? "repo-fleet";
   const manifestPath = repoFleetManifestPath(org, workspaceRoot);
   const flakeWorkspaceArgs = org.repo_fleet_manifest.flake && !extraArgs.includes("--workspace-root")
@@ -485,14 +524,32 @@ function runRepoFleetCommand(
     : [];
   const args = [command, "--manifest", manifestPath, ...flakeWorkspaceArgs, ...extraArgs];
   const result = spawnSync(repoFleetBin, args, { encoding: "utf8" });
-  return result.status === 0
-    ? { status: 0, error: null, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
-    : {
-        status: result.status ?? 1,
-        error: `${repoFleetBin} ${args.join(" ")} failed`,
-        stdout: result.stdout ?? "",
-        stderr: result.stderr ?? "",
-      };
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  if (result.status === 0 && !result.error) {
+    return { status: 0, error: null, stdout, stderr };
+  }
+
+  const executable = JSON.stringify(repoFleetBin);
+  const invocationArgs = JSON.stringify(args);
+  if (result.error) {
+    return {
+      status: result.status ?? 1,
+      error: `failed to launch repo-fleet executable ${executable} with arguments ${invocationArgs}: ${result.error.message}`,
+      stdout,
+      stderr,
+    };
+  }
+
+  const status = result.status ?? 1;
+  const termination = result.signal ? `signal ${result.signal}` : `status ${status}`;
+  const detail = stderr.trim() || stdout.trim() || "no diagnostic output";
+  return {
+    status,
+    error: `repo-fleet executable ${executable} exited with ${termination}; arguments ${invocationArgs}; detail: ${detail}`,
+    stdout,
+    stderr,
+  };
 }
 
 function parseRepoFleetOutput(command: string, output: string, jsonOutput: boolean): unknown {
@@ -543,7 +600,60 @@ function jsonRows(command: string, rows: Array<Record<string, unknown>>): unknow
       })),
     };
   }
+  if (command === "reconcile") {
+    const results = rows.map((row) => {
+      const output = isPlainObject(row.output) ? row.output : null;
+      const manifestError = isPlainObject(row.manifest) && typeof row.manifest.error === "string"
+        ? row.manifest.error
+        : null;
+      const error = row.error ?? manifestError;
+      return output
+        ? { ...output, organization: row.organization, status: row.status, error }
+        : { organization: row.organization, status: row.status, manifest: row.manifest, output: row.output, error };
+    });
+    return {
+      ok: rows.every((row) => row.status === 0),
+      organizations: rows.length,
+      upstream_repository_count: sumNumericOutputField(rows, "upstream_repository_count"),
+      manifest_repository_count: sumNumericOutputField(rows, "manifest_repository_count"),
+      missing: flattenOutputItems(rows, "missing"),
+      stale: flattenOutputItems(rows, "stale"),
+      metadata_drift: flattenOutputItems(rows, "metadata_drift"),
+      added: flattenOutputItems(rows, "added"),
+      wrote_manifests: rows
+        .filter((row) => isPlainObject(row.output) && row.output.wrote_manifest === true)
+        .map((row) => row.organization),
+      results,
+    };
+  }
   return rows;
+}
+
+function sumNumericOutputField(rows: Array<Record<string, unknown>>, field: string): number {
+  return rows.reduce((total, row) => {
+    const output = row.output;
+    const value = isPlainObject(output) ? output[field] : null;
+    return total + (typeof value === "number" ? value : 0);
+  }, 0);
+}
+
+function flattenOutputItems(rows: Array<Record<string, unknown>>, field: string): unknown[] {
+  return rows.flatMap((row) => {
+    const output = row.output;
+    const items = isPlainObject(output) ? output[field] : null;
+    if (!Array.isArray(items)) {
+      return [];
+    }
+    return items.map((item) => {
+      if (isPlainObject(item)) {
+        return { ...item, organization: row.organization };
+      }
+      if (field === "added" && typeof item === "string") {
+        return { name: item, organization: row.organization };
+      }
+      return { value: item, organization: row.organization };
+    });
+  });
 }
 
 function printTextRows(command: string, rows: Array<Record<string, unknown>>): void {
@@ -555,7 +665,7 @@ function printTextRows(command: string, rows: Array<Record<string, unknown>>): v
     }
     if (row.output) {
       console.log(row.output);
-    } else if (command === "clone-missing" || command === "sync") {
+    } else if (command === "clone-missing" || command === "sync" || command === "reconcile") {
       const manifest = row.manifest;
       if (isPlainObject(manifest)) {
         const action = manifest.manifest_repo_action;

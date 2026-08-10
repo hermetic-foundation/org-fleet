@@ -23,11 +23,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784519132,
-        "narHash": "sha256-J7Bb8Vwt+rbW9FVWBgN63BgSnYbAtKVvK+3/6h/hDuM=",
+        "lastModified": 1786389481,
+        "narHash": "sha256-D41vV1T3QaAevi5cvOirhdKuJU5UofgwX1jIy88oSR8=",
         "ref": "refs/heads/main",
-        "rev": "23c80be2e5b1022570bca12be4cced35ad20e5ef",
-        "revCount": 21,
+        "rev": "0bfc2dce2b5bac2cdf5248876a5a98f1e47346ae",
+        "revCount": 27,
         "type": "git",
         "url": "ssh://git@github.com/hermetic-foundation/repo-fleet.git"
       },

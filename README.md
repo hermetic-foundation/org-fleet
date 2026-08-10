@@ -73,13 +73,23 @@ org-fleet doctor --manifest org-fleet.json
 org-fleet clone-missing --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json -- --dry-run
+org-fleet reconcile --manifest org-fleet.json
+org-fleet reconcile --manifest org-fleet.json --write
 ```
 
 The repo-fleet-shaped commands run against every selected organization:
-`list`, `validate`, `remotes`, `status`, `doctor`, `clone-missing`, and `sync`.
+`list`, `validate`, `remotes`, `status`, `doctor`, `clone-missing`, `sync`, and
+`reconcile`.
 Use `--org ORG` to restrict the run to one organization. `path` takes an
 organization id and a repo or worktree id, then delegates to that org's
 `repo-fleet path`.
+
+`reconcile` compares each selected organization's upstream GitHub repository
+inventory with its repo-fleet manifest. It is read-only by default (`--dry-run`
+is an explicit alias); pass `--write` to let repo-fleet add missing entries.
+`--write` and `--dry-run` are mutually exclusive. JSON output aggregates counts,
+missing/stale/drift findings, additions, written manifests, and the underlying
+per-organization results.
 
 `clone-missing` and `sync` first make sure each organization manifest repository
 is available locally. Missing manifest repositories are cloned with Jujutsu when
@@ -92,6 +102,10 @@ and retry recognized transient network failures twice by default. Set
 `ORG_FLEET_VCS_RETRIES` to override the retry count. Non-mutating commands
 identify legacy manifests that have not been materialized and direct the user
 to `sync` or `clone-missing`.
+
+Delegated command failures report the selected repo-fleet executable, its exact
+argument vector, exit status or launch error, and captured diagnostics. Set
+`ORG_FLEET_REPO_FLEET_BIN` to select a repo-fleet executable explicitly.
 
 Use `orgs` and `manifest-path` for the organization index itself:
 
