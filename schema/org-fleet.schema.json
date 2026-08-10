@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hermetic-foundation/org-fleet/schema/org-fleet.schema.json",
+  "title": "org-fleet manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "organizations"],
+  "properties": {
+    "version": { "const": 1 },
+    "organizations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repo_fleet_manifest"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "repo_fleet_manifest": {
+            "type": "object",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "required": ["repository", "path"],
+                "properties": {
+                  "repository": { "type": "string", "minLength": 1, "pattern": "^[^/]+$" },
+                  "path": { "$ref": "#/$defs/relativePath" },
+                  "checkout_path": { "$ref": "#/$defs/relativePath" }
+                }
+              },
+              {
+                "additionalProperties": false,
+                "required": ["flake"],
+                "properties": {
+                  "flake": { "type": "string", "minLength": 1 },
+                  "attribute": { "type": "string", "minLength": 1 }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": { "pattern": "^/" }
+    }
+  }
+}
