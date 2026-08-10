@@ -24,6 +24,30 @@ Create `org-fleet.json` in a meta repository:
 }
 ```
 
+The organization manifest itself may be supplied as an evaluation-only flake
+attribute such as `flake:.#orgFleetManifest`, exposed with:
+
+```nix
+orgFleetManifest = builtins.fromJSON (builtins.readFile ./org-fleet.json);
+```
+
+Organizations may also point directly at flake-backed repo-fleet data, avoiding
+the manifest-repository clone bootstrap:
+
+```json
+{
+  "id": "example-org",
+  "repo_fleet_manifest": {
+    "flake": "git+ssh://git@github.com/example-org/meta.git",
+    "attribute": "repoFleetManifest"
+  }
+}
+```
+
+File pointers remain supported. Flake sources are resolved with
+`nix eval --json` and substituters disabled, so resolution neither builds
+packages nor queries private binary caches.
+
 For the example above, `org-fleet` derives the manifest repository remote as
 `git@github.com:example-org/meta.git`, expects the local checkout at
 `<workspace-root>/example-org/meta`, and runs `repo-fleet` against
@@ -62,6 +86,12 @@ is available locally. Missing manifest repositories are cloned with Jujutsu when
 available, existing Jujutsu manifest repositories are fetched with
 `jj git fetch`, and repo-fleet receives `--dry-run` when org-fleet does.
 Arguments after `--` are passed to each repo-fleet invocation.
+
+Manifest repository clone and fetch operations retain actionable diagnostics
+and retry recognized transient network failures twice by default. Set
+`ORG_FLEET_VCS_RETRIES` to override the retry count. Non-mutating commands
+identify legacy manifests that have not been materialized and direct the user
+to `sync` or `clone-missing`.
 
 Use `orgs` and `manifest-path` for the organization index itself:
 
