@@ -23,11 +23,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787102822,
-        "narHash": "sha256-Ad7T+WcVYkU6kX/zlRfEwep5jKu2UTd+kU3u3bqCz4Y=",
+        "lastModified": 1787113260,
+        "narHash": "sha256-VgMlVL8xJvy3UeyA2dj4eRjOBfDtG9z2D+oI2xvjpwg=",
         "owner": "hermetic-foundation",
         "repo": "repo-fleet",
-        "rev": "1618e45f5c26601e8b0628ebcdcf4db5a7d5faaa",
+        "rev": "fb91c4913caf319b1f8fe4dc2a086e89acf67d3a",
         "type": "github"
       },
       "original": {
