@@ -23,17 +23,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1786389481,
-        "narHash": "sha256-D41vV1T3QaAevi5cvOirhdKuJU5UofgwX1jIy88oSR8=",
-        "ref": "refs/heads/main",
-        "rev": "0bfc2dce2b5bac2cdf5248876a5a98f1e47346ae",
-        "revCount": 27,
-        "type": "git",
-        "url": "ssh://git@github.com/hermetic-foundation/repo-fleet.git"
+        "lastModified": 1787102822,
+        "narHash": "sha256-Ad7T+WcVYkU6kX/zlRfEwep5jKu2UTd+kU3u3bqCz4Y=",
+        "owner": "hermetic-foundation",
+        "repo": "repo-fleet",
+        "rev": "1618e45f5c26601e8b0628ebcdcf4db5a7d5faaa",
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "ssh://git@github.com/hermetic-foundation/repo-fleet.git"
+        "owner": "hermetic-foundation",
+        "repo": "repo-fleet",
+        "type": "github"
       }
     },
     "root": {

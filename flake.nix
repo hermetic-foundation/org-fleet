@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    repo-fleet.url = "git+ssh://git@github.com/hermetic-foundation/repo-fleet.git";
+    repo-fleet.url = "github:hermetic-foundation/repo-fleet";
     repo-fleet.inputs.nixpkgs.follows = "nixpkgs";
   };
 
