@@ -24,6 +24,8 @@ interface ParsedArgs {
   json: boolean;
   dryRun: boolean;
   write: boolean;
+  rebase: boolean;
+  notifyConflicts: boolean;
   orgs: string[];
   args: string[];
   error: string | null;
@@ -73,7 +75,18 @@ function main(argv: string[]): number {
     return commandManifestPath(manifest, workspaceRoot, parsed.args, parsed.json);
   }
   if (parsed.command && REPO_FLEET_COMMANDS.has(parsed.command)) {
-    return commandRepoFleet(manifest, orgs, workspaceRoot, parsed.command, parsed.dryRun, parsed.write, parsed.json, parsed.args);
+    return commandRepoFleet(
+      manifest,
+      orgs,
+      workspaceRoot,
+      parsed.command,
+      parsed.dryRun,
+      parsed.write,
+      parsed.json,
+      parsed.args,
+      parsed.rebase,
+      parsed.notifyConflicts,
+    );
   }
 
   console.error(`unknown command ${parsed.command}`);
@@ -89,6 +102,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     json: false,
     dryRun: false,
     write: false,
+    rebase: true,
+    notifyConflicts: false,
     orgs: [],
     args: [],
     error: null,
@@ -136,6 +151,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.dryRun = true;
     } else if (arg === "--write") {
       result.write = true;
+    } else if (arg === "--no-rebase") {
+      result.rebase = false;
+    } else if (arg === "--notify-conflicts") {
+      result.notifyConflicts = true;
     } else if (arg === "--") {
       result.args.push(...args);
       break;
@@ -150,6 +169,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     result.error = "--write is only valid with reconcile";
   } else if (result.write && result.dryRun) {
     result.error = "--write and --dry-run are mutually exclusive";
+  } else if ((!result.rebase || result.notifyConflicts) && result.command !== "sync") {
+    result.error = "--no-rebase and --notify-conflicts are only valid with sync";
   }
   return result;
 }
@@ -172,7 +193,7 @@ function printUsage(): void {
   org-fleet status [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
   org-fleet doctor [--manifest PATH] [--workspace-root PATH] [--org ORG] [--json]
   org-fleet clone-missing [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
-  org-fleet sync [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [-- REPO_FLEET_ARGS...]
+  org-fleet sync [--manifest PATH] [--workspace-root PATH] [--org ORG] [--dry-run] [--json] [--no-rebase] [--notify-conflicts] [-- REPO_FLEET_ARGS...]
   org-fleet reconcile [--manifest PATH] [--workspace-root PATH] [--org ORG] [--write | --dry-run] [--json] [-- REPO_FLEET_ARGS...]
   org-fleet version`);
 }
@@ -243,6 +264,8 @@ function commandRepoFleet(
   write: boolean,
   jsonOutput: boolean,
   args: string[],
+  rebase: boolean,
+  notifyConflicts: boolean,
 ): number {
   if (command === "path") {
     return commandRepoFleetPath(manifest, workspaceRoot, args, jsonOutput);
@@ -254,6 +277,14 @@ function commandRepoFleet(
   }
   if (dryRun && MUTATING_REPO_FLEET_COMMANDS.has(command) && !repoFleetArgs.includes("--dry-run")) {
     repoFleetArgs.push("--dry-run");
+  }
+  if (command === "sync") {
+    if (!rebase && !repoFleetArgs.includes("--no-rebase")) {
+      repoFleetArgs.push("--no-rebase");
+    }
+    if (notifyConflicts && !repoFleetArgs.includes("--notify-conflicts")) {
+      repoFleetArgs.push("--notify-conflicts");
+    }
   }
   const reconcileWrite = command === "reconcile" && (write || repoFleetArgs.includes("--write"));
   const reconcileDryRun = command === "reconcile" && (dryRun || repoFleetArgs.includes("--dry-run"));

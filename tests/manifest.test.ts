@@ -225,6 +225,50 @@ test("sync invokes repo-fleet for organizations with manifests", () => {
   }
 });
 
+test("sync forwards top-level rebase flags to repo-fleet", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const binDir = path.join(root, "bin");
+  mkdirSync(binDir);
+  const repoFleet = path.join(binDir, "repo-fleet");
+  const logPath = path.join(root, "repo-fleet.log");
+  writeFileSync(
+    repoFleet,
+    `#!/bin/sh\nprintf '%s\\n' "$*" > ${JSON.stringify(logPath)}\nexit 0\n`,
+    "utf8",
+  );
+  chmodSync(repoFleet, 0o755);
+
+  const data = validManifest();
+  const manifestPath = path.join(root, "org-fleet.json");
+  writeFileSync(manifestPath, JSON.stringify(data), "utf8");
+  const orgMeta = path.join(root, "example-org", "meta");
+  mkdirSync(path.join(orgMeta, ".git"), { recursive: true });
+  writeFileSync(path.join(orgMeta, "repo-fleet.json"), JSON.stringify({ version: 1 }), "utf8");
+
+  const previousBin = process.env.ORG_FLEET_REPO_FLEET_BIN;
+  process.env.ORG_FLEET_REPO_FLEET_BIN = repoFleet;
+  try {
+    assert.equal(main([
+      "sync",
+      "--manifest", manifestPath,
+      "--workspace-root", root,
+      "--dry-run",
+      "--no-rebase",
+      "--notify-conflicts",
+    ]), 0);
+  } finally {
+    if (previousBin === undefined) {
+      delete process.env.ORG_FLEET_REPO_FLEET_BIN;
+    } else {
+      process.env.ORG_FLEET_REPO_FLEET_BIN = previousBin;
+    }
+  }
+
+  const invocation = readFileSync(logPath, "utf8");
+  assert.match(invocation, /--no-rebase/);
+  assert.match(invocation, /--notify-conflicts/);
+});
+
 test("orgs lists organization manifest pointers", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
   const manifestPath = path.join(root, "org-fleet.json");

@@ -72,7 +72,7 @@ org-fleet status --manifest org-fleet.json
 org-fleet doctor --manifest org-fleet.json
 org-fleet clone-missing --manifest org-fleet.json --dry-run
 org-fleet sync --manifest org-fleet.json --dry-run
-org-fleet sync --manifest org-fleet.json -- --dry-run
+org-fleet sync --manifest org-fleet.json --notify-conflicts
 org-fleet reconcile --manifest org-fleet.json
 org-fleet reconcile --manifest org-fleet.json --write
 ```
@@ -95,7 +95,10 @@ per-organization results.
 is available locally. Missing manifest repositories are cloned with Jujutsu when
 available, existing Jujutsu manifest repositories are fetched with
 `jj git fetch`, and repo-fleet receives `--dry-run` when org-fleet does.
-Arguments after `--` are passed to each repo-fleet invocation.
+Repository sync uses repo-fleet's default rebase behavior; pass `--no-rebase`
+to fetch without rebasing, or `--notify-conflicts` to send a libnotify
+notification for each repository whose rebase fails. Arguments after `--` are
+passed to each repo-fleet invocation.
 
 Manifest repository clone and fetch operations retain actionable diagnostics
 and retry recognized transient network failures twice by default. Set
