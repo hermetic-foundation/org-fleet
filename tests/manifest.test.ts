@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -172,6 +172,44 @@ test("sync dry-run plans a clone for missing manifest repository", () => {
   writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
 
   assert.equal(main(["sync", "--manifest", manifestPath, "--workspace-root", root, "--dry-run"]), 0);
+});
+
+test("sync creates a missing organization directory before cloning its manifest repository", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "org-fleet-"));
+  const binDir = path.join(root, "bin");
+  const manifestPath = path.join(root, "org-fleet.json");
+  const repoFleetLog = path.join(root, "repo-fleet.log");
+  const repoFleet = path.join(binDir, "repo-fleet");
+  mkdirSync(binDir);
+  writeFileSync(manifestPath, JSON.stringify(validManifest()), "utf8");
+  writeFileSync(
+    path.join(binDir, "jj"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+for argument do destination=$argument; done
+mkdir -p "$destination/.git"
+printf '{"version":1}\n' > "$destination/repo-fleet.json"
+`,
+    "utf8",
+  );
+  writeFileSync(repoFleet, `#!/bin/sh\nprintf '%s\\n' "$*" > ${JSON.stringify(repoFleetLog)}\n`, "utf8");
+  chmodSync(path.join(binDir, "jj"), 0o755);
+  chmodSync(repoFleet, 0o755);
+
+  const previousPath = process.env.PATH;
+  const previousBin = process.env.ORG_FLEET_REPO_FLEET_BIN;
+  process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+  process.env.ORG_FLEET_REPO_FLEET_BIN = repoFleet;
+  try {
+    assert.equal(existsSync(path.join(root, "example-org")), false);
+    assert.equal(main(["sync", "--manifest", manifestPath, "--workspace-root", root]), 0);
+    assert.equal(existsSync(path.join(root, "example-org", "meta", "repo-fleet.json")), true);
+    assert.match(readFileSync(repoFleetLog, "utf8"), /^sync --manifest /);
+  } finally {
+    process.env.PATH = previousPath;
+    if (previousBin === undefined) delete process.env.ORG_FLEET_REPO_FLEET_BIN;
+    else process.env.ORG_FLEET_REPO_FLEET_BIN = previousBin;
+  }
 });
 
 test("plan reports missing repo-fleet manifest in existing manifest repository", () => {

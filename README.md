@@ -97,7 +97,7 @@ available, existing Jujutsu manifest repositories are fetched with
 `jj git fetch`, and repo-fleet receives `--dry-run` when org-fleet does.
 Repository sync uses repo-fleet's default rebase behavior; pass `--no-rebase`
 to fetch without rebasing, or `--notify-conflicts` to send a libnotify
-notification for each repository whose rebase fails. Arguments after `--` are
+notification for each repository whose rebase leaves conflicts. Arguments after `--` are
 passed to each repo-fleet invocation.
 
 Manifest repository clone and fetch operations retain actionable diagnostics

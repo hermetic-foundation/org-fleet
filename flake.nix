@@ -106,6 +106,8 @@
             chmod -R u+w source
             cd source
             cp -R ${self.packages.${system}.org-fleet}/lib/org-fleet/node_modules node_modules
+            chmod -R u+w node_modules
+            patchShebangs node_modules
             npm test
             npm run typecheck
             touch $out

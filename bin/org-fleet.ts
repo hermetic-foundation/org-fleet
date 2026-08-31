@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -491,6 +491,7 @@ interface RepoFleetCommandResult {
 function cloneManifestRepo(org: Organization, workspaceRoot: string): VcsResult {
   const destination = manifestRepoPath(org, workspaceRoot);
   const parent = path.dirname(destination);
+  mkdirSync(parent, { recursive: true });
   const args = commandAvailable("jj")
     ? ["git", "clone", "--colocate", manifestRepoRemote(org), destination]
     : ["clone", manifestRepoRemote(org), destination];
