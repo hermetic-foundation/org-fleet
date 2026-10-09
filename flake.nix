@@ -108,6 +108,10 @@
             cp -R ${self.packages.${system}.org-fleet}/lib/org-fleet/node_modules node_modules
             chmod -R u+w node_modules
             patchShebangs node_modules
+            # Package scripts may invoke nested test runners; bound each invocation.
+            export GOMAXPROCS="$NIX_BUILD_CORES"
+            substituteInPlace package.json \
+              --replace-fail 'tsx --test' "tsx --test --test-concurrency=$NIX_BUILD_CORES"
             npm test
             npm run typecheck
             touch $out
